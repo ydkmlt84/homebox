@@ -12,6 +12,86 @@ import (
 // Extracted to satisfy goconst.
 const fixtureAppURL = "https://app.example.com"
 
+func TestGetHBURLUsesRequestHostWithoutReferer(t *testing.T) {
+	req := httptest.NewRequest("GET", "https://app.example.com/api/v1/labelmaker/asset/000-001", nil)
+
+	got := GetHBURL(req, &config.Options{}, "0.0.0.0:7745")
+
+	assert.Equal(t, fixtureAppURL, got)
+}
+
+func TestGetHBURLRejectsInvalidRequestHost(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/labelmaker/asset/000-001", nil)
+	req.Host = "example.com/path"
+
+	got := GetHBURL(req, &config.Options{}, "0.0.0.0:7745")
+
+	assert.Empty(t, got)
+}
+
+func TestGetLabelURL(t *testing.T) {
+	const fallback = "https://app.example.com/a/000-001"
+
+	cases := []struct {
+		name      string
+		requested string
+		expected  string
+	}{
+		{
+			name:      "current page URL",
+			requested: "https://app.example.com/item/123?view=details#photos",
+			expected:  "https://app.example.com/item/123?view=details#photos",
+		},
+		{
+			name:      "same host with development port",
+			requested: "http://app.example.com:3000/item/123",
+			expected:  "http://app.example.com:3000/item/123",
+		},
+		{
+			name:      "different host",
+			requested: "https://example.net/item/123",
+			expected:  fallback,
+		},
+		{
+			name:      "non-HTTP scheme",
+			requested: "javascript:alert(1)",
+			expected:  fallback,
+		},
+		{
+			name:     "missing URL",
+			expected: fallback,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/api/v1/labelmaker/asset/000-001", nil)
+			if tc.requested != "" {
+				query := req.URL.Query()
+				query.Set("url", tc.requested)
+				req.URL.RawQuery = query.Encode()
+			}
+
+			assert.Equal(t, tc.expected, getLabelURL(req, fallback))
+		})
+	}
+}
+
+func TestGetLabelURLWithShortcut(t *testing.T) {
+	const fallback = "https://app.example.com/a/000-001"
+	req := httptest.NewRequest("GET", "/api/v1/labelmaker/asset/000-001", nil)
+	query := req.URL.Query()
+	query.Set("url", "https://app.example.com/item/123")
+	query.Set("shortcutName", "Open Homebox")
+	req.URL.RawQuery = query.Encode()
+
+	assert.Equal(
+		t,
+		"shortcuts://run-shortcut?input=text&name=Open+Homebox&text=https%3A%2F%2Fapp.example.com%2Fitem%2F123",
+		getLabelURL(req, fallback),
+	)
+}
+
 func TestSecureBaseURL(t *testing.T) {
 	cases := []struct {
 		name        string

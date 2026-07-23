@@ -19,6 +19,7 @@
   import { useDialog } from "@/components/ui/dialog-provider";
   import { Button, ButtonGroup } from "@/components/ui/button";
   import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+  import FormTextField from "~/components/Form/TextField.vue";
 
   const { t } = useI18n();
   const { openDialog, closeDialog } = useDialog();
@@ -41,14 +42,74 @@
   });
 
   const serverPrinting = ref(false);
+  const shortcutName = ref("");
+  const selectedLabelPosition = ref(1);
+  const usesAverySheet = computed(() => props.type === "item" || props.type === "entity");
+
+  const AVERY_5260_LABEL_COUNT = 30;
+
+  function printAvery5260Sheet(printWindow: Window, labelUrl: string) {
+    const doc = printWindow.document;
+    doc.title = `label-${props.id}`;
+
+    const style = doc.createElement("style");
+    style.textContent = `
+      @page { size: Letter portrait; margin: 0; }
+      html, body { margin: 0; width: 8.5in; height: 11in; }
+      .sheet {
+        box-sizing: border-box;
+        display: grid;
+        grid-template-columns: repeat(3, 2.625in);
+        grid-template-rows: repeat(10, 1in);
+        column-gap: 0.125in;
+        width: 8.5in;
+        height: 11in;
+        padding: 0.5in 0.1875in;
+      }
+      .label { width: 2.625in; height: 1in; overflow: hidden; }
+      .label img { display: block; width: 100%; height: 100%; object-fit: contain; }
+    `;
+    doc.head.appendChild(style);
+
+    const sheet = doc.createElement("main");
+    sheet.className = "sheet";
+
+    for (let position = 1; position <= AVERY_5260_LABEL_COUNT; position++) {
+      const cell = doc.createElement("div");
+      cell.className = "label";
+
+      if (position === selectedLabelPosition.value) {
+        const image = doc.createElement("img");
+        image.alt = "";
+        image.addEventListener("load", () => {
+          printWindow.focus();
+          printWindow.print();
+        });
+        image.src = labelUrl;
+        cell.appendChild(image);
+      }
+
+      sheet.appendChild(cell);
+    }
+
+    doc.body.appendChild(sheet);
+  }
 
   function browserPrint() {
-    const printWindow = window.open(getLabelUrl(false), "popup=true");
+    const labelUrl = getLabelUrl(false);
+
+    if (!usesAverySheet.value) {
+      const printWindow = window.open(labelUrl, "_blank", "popup");
+      if (printWindow !== null) {
+        printWindow.onload = () => printWindow.print();
+      }
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "popup=true");
 
     if (printWindow !== null) {
-      printWindow.onload = () => {
-        printWindow.print();
-      };
+      printAvery5260Sheet(printWindow, labelUrl);
     }
   }
 
@@ -79,7 +140,11 @@
 
   function getLabelUrl(print: boolean): string {
     const { selectedId } = useCollections();
-    const params: Record<string, QueryValue> = { print };
+    const params: Record<string, QueryValue> = {
+      print,
+      url: window.location.href,
+      shortcutName: shortcutName.value,
+    };
 
     if (selectedId.value) {
       params.tenant = selectedId.value;
@@ -109,7 +174,31 @@
             {{ $t("components.global.label_maker.confirm_description") }}
           </DialogDescription>
         </DialogHeader>
-        <img :src="getLabelUrl(false)" />
+        <img class="max-h-40 object-contain" :src="getLabelUrl(false)" />
+        <FormTextField
+          v-model="shortcutName"
+          :label="$t('components.global.label_maker.shortcut_name')"
+          :placeholder="$t('components.global.label_maker.shortcut_name_placeholder')"
+          :max-length="255"
+        />
+        <div v-if="usesAverySheet">
+          <p class="mb-2 text-sm font-medium">
+            {{ $t("reports.label_generator.skip_first_labels") }}: {{ selectedLabelPosition - 1 }}
+          </p>
+          <div class="grid grid-cols-3 gap-1" role="grid">
+            <Button
+              v-for="position in AVERY_5260_LABEL_COUNT"
+              :key="position"
+              type="button"
+              size="sm"
+              :variant="selectedLabelPosition === position ? 'default' : 'outline'"
+              :aria-label="`${$t('reports.label_generator.skip_first_labels')}: ${position - 1}`"
+              @click="selectedLabelPosition = position"
+            >
+              {{ position }}
+            </Button>
+          </div>
+        </div>
         <DialogFooter>
           <ButtonGroup>
             <Button v-if="status?.labelPrinting || false" type="submit" :disabled="serverPrinting" @click="serverPrint">

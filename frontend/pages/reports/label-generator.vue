@@ -2,6 +2,7 @@
   import { useI18n } from "vue-i18n";
   import DOMPurify from "dompurify";
   import { route } from "../../lib/api/base";
+  import { buildLabelURL } from "../../lib/label-url";
   import { Toaster, toast } from "@/components/ui/sonner";
   import { Separator } from "@/components/ui/separator";
   import { Button } from "@/components/ui/button";
@@ -38,8 +39,9 @@
 
   const displayProperties = reactive({
     baseURL: window.location.origin,
+    shortcutName: "",
     assetRange: 1,
-    assetRangeMax: 91,
+    assetRangeMax: 0,
     skipLabels: 0,
     measure: "in",
     gapY: 0.25,
@@ -194,6 +196,11 @@
         ref: "baseURL",
         type: "text",
       },
+      {
+        label: t("components.global.label_maker.shortcut_name"),
+        ref: "shortcutName",
+        type: "text",
+      },
     ];
   });
 
@@ -220,7 +227,7 @@
       origin = origin.slice(0, -1);
     }
 
-    const data = `${origin}/a/${assetID}`;
+    const data = buildLabelURL(`${origin}/a/${assetID}`, displayProperties.shortcutName);
 
     return route(`/qrcode`, { data: encodeURIComponent(data) });
   }
@@ -255,19 +262,21 @@
     return data;
   });
 
+  displayProperties.assetRangeMax = allFields.value?.items?.length ?? 0;
+
   const items = computed(() => {
     if (displayProperties.assetRange > displayProperties.assetRangeMax) {
       return [];
     }
 
-    const diff = displayProperties.assetRangeMax - displayProperties.assetRange;
+    const count = displayProperties.assetRangeMax - displayProperties.assetRange + 1;
 
-    if (diff > 999) {
+    if (count > 1000) {
       return [];
     }
 
     const items: LabelData[] = [];
-    for (let i = displayProperties.assetRange - 1; i < displayProperties.assetRangeMax - 1; i++) {
+    for (let i = displayProperties.assetRange - 1; i < displayProperties.assetRangeMax; i++) {
       const item = allFields?.value?.items?.[i];
       // Real items render their own data; indices past the inventory render
       // as blank pre-printable labels. The old guard required the removed
@@ -311,6 +320,7 @@
   };
 
   const pages = ref<Page[]>([]);
+  const printArea = ref<HTMLElement | null>(null);
 
   const out = ref({
     measure: "in",
@@ -396,6 +406,27 @@
     }
 
     pages.value = calc;
+  }
+
+  async function printLabels() {
+    calcPages();
+    await nextTick();
+
+    const images = Array.from(printArea.value?.querySelectorAll("img") ?? []);
+    await Promise.all(
+      images.map((image) => {
+        if (image.complete) {
+          return Promise.resolve();
+        }
+
+        return new Promise<void>((resolve) => {
+          image.addEventListener("load", () => resolve(), { once: true });
+          image.addEventListener("error", () => resolve(), { once: true });
+        });
+      })
+    );
+
+    window.print();
   }
 
   onMounted(() => {
@@ -501,13 +532,18 @@
 
       <div>
         <p>{{ $t("reports.label_generator.qr_code_example") }} {{ displayProperties.baseURL }}/a/{asset_id}</p>
-        <Button size="lg" class="my-4 w-full" @click="calcPages">
-          {{ $t("reports.label_generator.generate_page") }}
-        </Button>
+        <div class="my-4 flex gap-2">
+          <Button size="lg" class="w-full" @click="calcPages">
+            {{ $t("reports.label_generator.generate_page") }}
+          </Button>
+          <Button size="lg" class="w-full" @click="printLabels">
+            {{ $t("components.global.label_maker.browser_print") }}
+          </Button>
+        </div>
       </div>
     </div>
   </div>
-  <div class="flex flex-col items-center">
+  <div ref="printArea" class="flex flex-col items-center">
     <section
       v-for="(page, pi) in pages"
       :key="pi"

@@ -161,6 +161,8 @@
                 "download": "Download Label",
                 "print": "Print label",
                 "server_print": "Print on Server",
+                "shortcut_name": "iOS Shortcut Name",
+                "shortcut_name_placeholder": "Leave blank to use the normal Homebox URL",
                 "titles": "Labels",
                 "toast": {
                     "load_status_failed": "Failed to load status",

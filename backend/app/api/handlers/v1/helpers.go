@@ -13,7 +13,8 @@ import (
 // 1. Configured hostname from Options.Hostname
 // 2. X-Forwarded headers (if TrustProxy is enabled)
 // 3. Referer header
-// 4. Fallback URL (ctrl.url)
+// 4. Request host
+// 5. Fallback URL (ctrl.url)
 func GetHBURL(r *http.Request, options *config.Options, fallback string) string {
 	// 1. Use configured hostname if set
 	if options.Hostname != "" {
@@ -33,12 +34,54 @@ func GetHBURL(r *http.Request, options *config.Options, fallback string) string 
 		return stripPathFromURL(referer)
 	}
 
-	// 4. Fall back to the controller's URL
+	// 4. Use the request host. Label requests may not include a Referer when
+	// Referrer-Policy is set to no-referrer, but their QR codes still require
+	// an absolute URL so scanners recognize them as links.
+	if validProxyHost(r.Host) {
+		return getScheme(r, options.TrustProxy) + "://" + r.Host
+	}
+
+	// 5. Fall back to the controller's URL
 	if fallback != "" {
 		return stripPathFromURL(fallback)
 	}
 
 	return ""
+}
+
+// getLabelURL returns the browser's current page URL when it is a valid
+// HTTP(S) URL for the same host as the server-generated fallback. When a
+// shortcut name is supplied, the URL is passed to that iOS Shortcut as text.
+func getLabelURL(r *http.Request, fallback string) string {
+	labelURL := fallback
+	rawURL := strings.TrimSpace(r.URL.Query().Get("url"))
+	if rawURL != "" {
+		requestedURL, requestedErr := url.Parse(rawURL)
+		fallbackURL, fallbackErr := url.Parse(fallback)
+		if requestedErr == nil && fallbackErr == nil && requestedURL.User == nil {
+			scheme := strings.ToLower(requestedURL.Scheme)
+			if (scheme == "http" || scheme == schemeHTTPS) && requestedURL.Hostname() != "" &&
+				strings.EqualFold(requestedURL.Hostname(), fallbackURL.Hostname()) {
+				labelURL = requestedURL.String()
+			}
+		}
+	}
+
+	shortcutName := strings.TrimSpace(r.URL.Query().Get("shortcutName"))
+	if shortcutName == "" || len(shortcutName) > 255 || labelURL == "" {
+		return labelURL
+	}
+
+	shortcutQuery := url.Values{}
+	shortcutQuery.Set("name", shortcutName)
+	shortcutQuery.Set("input", "text")
+	shortcutQuery.Set("text", labelURL)
+
+	return (&url.URL{
+		Scheme:   "shortcuts",
+		Host:     "run-shortcut",
+		RawQuery: shortcutQuery.Encode(),
+	}).String()
 }
 
 // ensureScheme ensures the hostname has a proper URL scheme

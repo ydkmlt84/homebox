@@ -241,7 +241,11 @@
             variant="outline"
             @click="
               openDialog(DialogID.EditMaintenance, {
-                params: { type: 'duplicate', maintenanceEntry: e, itemId: props.currentItemId! },
+                params: {
+                  type: 'duplicate',
+                  maintenanceEntry: e,
+                  itemId: props.currentItemId ?? (e as MaintenanceEntryWithDetails).itemID,
+                },
                 onClose: result => {
                   if (result) {
                     refreshList();
